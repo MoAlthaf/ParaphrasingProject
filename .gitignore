@@ -3,3 +3,5 @@
 .env
 
 /logs
+
+src/utils/__pycache__/
