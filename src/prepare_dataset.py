@@ -6,7 +6,7 @@ from openai import OpenAI
 from pathlib import Path
 from dotenv import load_dotenv
 from itertools import islice
-from utils.sql_utils import extract_schema, get_sample_rows_from_tables, run_query, extract_tables
+from utils.sql_utils import extract_schema, get_sample_rows_from_tables, run_query, extract_tables, trim_schema, trim_by_tokens
 from utils.logger import setup_logger
 
 # --- Environment & Constants ---
@@ -24,8 +24,6 @@ logger = setup_logger("prepare_dataset", LOG_PATH)
 
 # --- LLM  ---
 def generate_sql_query(schema, model="gpt-4o"):
-    print("I am accessed")
-
     system_prompt = (
         "You are an expert SQL query generator.\n"
         "Given a database schema and example rows, generate a list of SQL queries.\n"
@@ -144,6 +142,9 @@ def main():
         logger.info(f"Processing DB: {db_file.name}")
         
         schema_text = extract_schema(db_full_path)
+        schema_text = trim_schema(schema_text, max_tables=5)
+        schema_text = trim_by_tokens(schema_text, max_tokens=3000)
+        
         try:
             sql_queries = generate_sql_query(schema_text)
         except Exception as e:

@@ -4,7 +4,8 @@ from pathlib import Path
 from typing import List, Tuple, Any, Dict
 from contextlib import closing
 from sql_metadata import Parser
-
+import tiktoken
+import re
 
 def validate_db_path(db_path: Path) -> None:
     """
@@ -93,7 +94,27 @@ def run_query(db_path: Path, query: str) -> pd.DataFrame:
             raise ValueError(f"Query failed: {query}. Error: {e}")
 
 
-
-
 def extract_tables(sql: str) -> list:
     return Parser(sql).tables
+
+def trim_schema(schema_text: str, max_tables: int = 5) -> str:
+    """
+    Trims schema to include only the first N tables and their columns.
+
+    Assumes schema is in the format:
+    Table: table_name (col1, col2, ...)
+    """
+    trimmed = []
+    table_blocks = re.findall(r"(Table: .+?\n(?:.+\n)+)", schema_text, re.MULTILINE)
+    for block in table_blocks[:max_tables]:
+        trimmed.append(block.strip())
+
+    return "\n\n".join(trimmed)
+
+def trim_by_tokens(text, max_tokens=3000, model="gpt-4o"):
+    enc = tiktoken.encoding_for_model(model)
+    tokens = enc.encode(text)
+    if len(tokens) > max_tokens:
+        tokens = tokens[:max_tokens]
+        text = enc.decode(tokens)
+    return text
