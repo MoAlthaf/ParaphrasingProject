@@ -3,6 +3,7 @@ import pandas as pd
 from pathlib import Path
 from typing import List, Tuple, Any, Dict
 from contextlib import closing
+from sql_metadata import Parser
 
 
 def validate_db_path(db_path: Path) -> None:
@@ -61,24 +62,19 @@ def extract_schema(db_path: Path) -> str:
     return "\n".join(schema_lines)
 
 
-def get_sample_rows(
-    db_path: Path, limit: int = 3
-) -> Dict[str, Tuple[List[str], List[Tuple[Any, ...]]]]:
-    """
-    Retrieve sample rows (and column names) from all tables.
-    """
+def get_sample_rows_from_tables(db_path: Path, tables: List[str], limit: int = 3):
     sample_data = {}
 
     with closing(connect_to_db(db_path)) as conn:
-        for table in get_table_names(conn):
+        for table in tables:
             try:
                 cursor = conn.cursor()
                 cursor.execute(f"SELECT * FROM {table} LIMIT {limit};")
                 rows = cursor.fetchall()
                 col_names = [desc[0] for desc in cursor.description]
                 sample_data[table] = (col_names, rows)
-            except sqlite3.Error as e:
-                print(f"Skipping table '{table}' due to error: {e}")
+            except Exception as e:
+                print(f"⚠️ Could not get rows from '{table}': {e}")
 
     return sample_data
 
@@ -95,3 +91,9 @@ def run_query(db_path: Path, query: str) -> pd.DataFrame:
             return pd.read_sql_query(query, conn)
         except Exception as e:
             raise ValueError(f"Query failed: {query}. Error: {e}")
+
+
+
+
+def extract_tables(sql: str) -> list:
+    return Parser(sql).tables

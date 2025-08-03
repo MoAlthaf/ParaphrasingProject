@@ -1,81 +1,186 @@
+import os
+import json
+import re
+import pandas as pd
 from openai import OpenAI
 from pathlib import Path
-import os
 from dotenv import load_dotenv
-from utils.sql_utils import extract_schema , get_sample_rows ,run_query
-import json
+from itertools import islice
+from utils.sql_utils import extract_schema, get_sample_rows_from_tables, run_query, extract_tables
+from utils.logger import setup_logger
 
+# --- Environment & Constants ---
 load_dotenv()
-
-OPENAI_API_KEY=os.getenv("OPEN_AI")
-
-
-client=OpenAI(api_key=OPENAI_API_KEY)
+OPENAI_API_KEY = os.getenv("OPEN_AI")
+client = OpenAI(api_key=OPENAI_API_KEY)
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-DB_PATH= Path(PROJECT_ROOT) / "data" / "database"   # Path to Spider database
-OUTPUT_PATH=Path(PROJECT_ROOT) / "data" / "interim"  # Path to output directory
+DB_PATH = PROJECT_ROOT / "data" / "database"
+OUTPUT_PATH = PROJECT_ROOT / "data" / "interim"
+LOG_PATH = PROJECT_ROOT / "logs" / "prepare_dataset.log"
+OUTPUT_CSV_PATH = OUTPUT_PATH / "generated_queries.csv"
 
+logger = setup_logger("prepare_dataset", LOG_PATH)
 
-def generate_sql_query(schema,sample_rows=None):
-    no_of_queries = 2  # Number of queries to generate
+# --- LLM  ---
+def generate_sql_query(schema, model="gpt-4o"):
+    print("I am accessed")
+
     system_prompt = (
-    "You are an expert SQL query generator.\n"
-    "Given a database schema and example rows, generate a list of SQL queries.\n"
-    "Requirements:\n"
-    "- Only generate syntactically correct SQL queries for a SQLite database.\n"
-    "- Do not hallucinate tables or column names.\n"
-    "- Use actual values seen in the sample rows.\n"
-    "- Cover diverse query types (SELECT, JOIN, GROUP BY, ORDER BY, etc.).\n"
-    "- Do not include natural language questions, comments, or any explanation.\n"
-    "- Do not include markdown, text, or formatting.\n"
-    "- Output ONLY a JSON array of SQL query strings.\n"
-    "- If unsure about any logic, skip it — do not assume."
+        "You are an expert SQL query generator.\n"
+        "Given a database schema and example rows, generate a list of SQL queries.\n"
+        "- Only generate syntactically correct SQL queries for SQLite.\n"
+        "- Do not hallucinate tables or columns.\n"
+        "- Use values seen in the schema or sample rows.\n"
+        "- Output ONLY a JSON array of SQL query strings.\n"
+        "- No explanations or formatting."
     )
 
     user_prompt = (
-        f"Here is the database schema, Generate {no_of_queries} queries: \n"
-        "Database Schema:\n"
-        f"{schema} \n"
-    
-        "Please provide the SQL query."
-        
-        )
-    
+        f"Here is the database schema. Generate 2 queries:\n{schema}"
+    )
+
     response = client.chat.completions.create(
-        model="gpt-4o",
+        model=model,
         messages=[
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt}
         ],
         temperature=0
     )
-    queries=json.loads(response.choices[0].message.content)
-    return queries
 
-def generarte_nl(sql_query,result):
-    
-    system_prompt=(
-        "You are a helpful assistant that generates natural language question for the given sql query and the result.\n"
-        "- "
+    raw_text = response.choices[0].message.content.strip()
+
+    # Preprocessing the response 
+    if raw_text.startswith("```"):
+        raw_text = re.sub(r"^```(?:json|sql)?\n?", "", raw_text)
+        raw_text = re.sub(r"\n?```$", "", raw_text).strip()
+
+    try:
+        return json.loads(raw_text)
+    except json.JSONDecodeError as e:
+        logger.error("Error while deoding response.")
+        return []
+
+
+def regenerate_sql(wrong_query, sample_rows, model="gpt-4o"):
+    sample_context = ""
+    for table, (cols, rows) in sample_rows.items():
+        sample_context += f"\nTable: {table} ({', '.join(cols)})\n"
+        for row in rows:
+            sample_context += " | ".join(str(val) for val in row) + "\n"
+
+    system_prompt = (
+        "You are an expert SQL query fixer.\n"
+        "- You are given an incorrect sql query. \n"
+        "- The query might look syntactically fine but can fail due to incorrect values.\n"
+        "- You are provided with sample rows from relevant tables to guide correction.\n"
+        "- Only use values shown in sample rows.\n"
+        "- Fix incorrect queries and return it.\n"
+        "- Output JSON array with exactly one fixed SQL string."
+    )
+    user_prompt = (
+        f"Here is the incorrect SQL query:\n{wrong_query}\n\n"
+        f"Sample rows:\n{sample_context}"
     )
 
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0,
+            max_tokens=800
+        )
+        raw_output = response.choices[0].message.content.strip()
+        if raw_output.startswith("```"):
+            raw_output = re.sub(r"```(json)?", "", raw_output).strip("`").strip()
 
-if __name__=="__main__":
+        parsed = json.loads(raw_output)
+        if isinstance(parsed, list) and len(parsed) > 0 and isinstance(parsed[0], str):
+            return parsed[0]
+        return wrong_query
+    except Exception as e:
+        logger.error(f"Error during SQL regeneration: {e}")
+        return wrong_query
 
-    for db_file in DB_PATH.iterdir():
-        db_full_path= Path(DB_PATH) / db_file / f"{db_file.name}.sqlite"
-        schema= extract_schema(db_full_path)
-        schema_text=schema
-        sample_rows=get_sample_rows(db_full_path)  # Replace "table_name" with an actual table name from your schema
-        sql_queries=generate_sql_query(schema_text)
-        for query in sql_queries:
-            print("Here is the Query: ",query)
-            result=run_query(db_full_path,query)
-            if not result.empty:
-                print(result.head())
+def generate_nl(sql_query, result, model="gpt-4o"):
+    if hasattr(result, 'to_string'):
+        result_str = result.to_string(index=False)
+    else:
+        result_str = str(result)
+
+    system_prompt = (
+        "You are a helpful assistant that converts SQL queries and their results into natural language questions.\n"
+        "- Use only visible columns and values.\n"
+        "- Do not add new columns.\n"
+        "- Output a single clear question."
+    )
+    user_prompt = f"SQL Query:\n{sql_query}\n\nResult:\n{result_str}"
+
+    try:
+        response = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt}
+            ],
+            temperature=0,
+            max_tokens=800
+        )
+        output = response.choices[0].message.content.strip()
+        return re.sub(r"```(text)?", "", output).strip("`").strip()
+    except Exception as e:
+        logger.error(f"Error generating natural language: {e}")
+        return "Failed to generate NL."
+
+# --- Main Dataset Builder ---
+def main():
+    rows = []
+    for db_file in islice(DB_PATH.iterdir(), 25):
+        db_full_path = DB_PATH / db_file / f"{db_file.name}.sqlite"
+        logger.info(f"Processing DB: {db_file.name}")
+        
+        schema_text = extract_schema(db_full_path)
+        try:
+            sql_queries = generate_sql_query(schema_text)
+        except Exception as e:
+            logger.error(f"Failed to generate SQL for {db_file.name}: {e}")
+            continue
+
+        for i, query in enumerate(sql_queries):
+            logger.info(f"Running Query {i+1}: {query}")
+            sample_rows = get_sample_rows_from_tables(db_full_path, extract_tables(query))
+            result = run_query(db_full_path, query)
+
+            if result.empty:
+                logger.warning("Original query returned empty. Attempting fix...")
+                query = regenerate_sql(query, sample_rows)
+                result = run_query(db_full_path, query)
+                if result.empty:
+                    logger.warning("Regenerated query also returned empty. Skipping.")
+                    continue
+                logger.info("Regenerated query succeeded.")
+                logger.info(f"Corrected Query: {query}")
             else:
-                print("The Query is wrong:")
-            print()
-        break
-    #print(sample_rows)
+                logger.info("Original query succeeded.")
+
+            nl_question = generate_nl(query, result)
+            logger.info(f"Generated NL: {nl_question}")
+
+            rows.append({
+                "db_name": db_file.name,
+                "natural_language": nl_question,
+                "sql_query": query
+            })
+
+        break  # remove this to process all DBs
+
+    df = pd.DataFrame(rows)
+    df.to_csv(OUTPUT_CSV_PATH, index=False)
+    logger.info(f" Saved dataset to: {OUTPUT_CSV_PATH}")
+
+if __name__ == "__main__":
+    main()
