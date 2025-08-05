@@ -6,8 +6,8 @@ from openai import OpenAI
 from pathlib import Path
 from dotenv import load_dotenv
 from itertools import islice
-from utils.sql_utils import extract_schema, get_sample_rows_from_tables, run_query, extract_tables, trim_schema, trim_by_tokens
-from utils.logger import setup_logger
+from src.utils.sql_utils import extract_schema, get_sample_rows_from_tables, run_query, extract_tables, trim_schema, trim_by_tokens
+from src.utils.logger import setup_logger
 
 # --- Environment & Constants ---
 load_dotenv()
@@ -92,6 +92,7 @@ def regenerate_sql(wrong_query, sample_rows, model="gpt-4o"):
             temperature=0,
             max_tokens=800
         )
+
         raw_output = response.choices[0].message.content.strip()
         if raw_output.startswith("```"):
             raw_output = re.sub(r"```(json)?", "", raw_output).strip("`").strip()
@@ -176,8 +177,6 @@ def main():
                 "natural_language": nl_question,
                 "sql_query": query
             })
-
-        break  # remove this to process all DBs
 
     df = pd.DataFrame(rows)
     df.to_csv(OUTPUT_CSV_PATH, index=False)
