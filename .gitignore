@@ -1,4 +1,4 @@
-/data
+/data/database
 
 .env
 
@@ -9,3 +9,5 @@ src/utils/__pycache__/
 test/
 
 models/__pycache__
+
+src/__pycache__/
