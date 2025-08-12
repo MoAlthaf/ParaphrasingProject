@@ -5,6 +5,7 @@ from typing import List, Tuple, Any, Dict
 from contextlib import closing
 from sql_metadata import Parser
 import tiktoken
+import numpy as np
 import re
 
 def validate_db_path(db_path: Path) -> None:
@@ -118,3 +119,48 @@ def trim_by_tokens(text, max_tokens=3000, model="gpt-4o"):
         tokens = tokens[:max_tokens]
         text = enc.decode(tokens)
     return text
+
+
+def compare_df(df1, df2):
+    """Compare two DataFrames for equality, ignoring row/column order and NaNs."""
+    if df1.shape != df2.shape:
+        return False
+
+    df1_vals = df1.values
+    df2_vals = df2.values
+
+    if np.array_equal(df1_vals, df2_vals):
+        return True
+
+    if (df1_vals == df2_vals).all():
+        return True
+    else:
+        def row_to_str(row):
+            return "|".join(str('' if pd.isna(x) else x) for x in row)
+             
+        a_str = "".join(sorted([row_to_str(row) for row in df1_vals]))
+        b_str = "".join(sorted([row_to_str(row) for row in df2_vals]))
+
+        if a_str == b_str:
+            return True
+        try:
+            return sorted(a_str) == sorted(b_str)
+        except Exception:
+            return False
+
+
+def compare_sql(db_path: Path, query1:str, query2:str) -> bool:
+    """Compare two SQL queries on the same database. Returns True if results match, else False."""
+    if query1 == query2:
+        return True
+    try:
+        conn = connect_to_db(db_path)
+        df1 = run_query(db_path, query1)
+        df2 = run_query(db_path, query2)
+        conn.close()
+        return compare_df(df1, df2)
+    except Exception as e:
+        print(f"[run_all] Error: {e}")
+        return False
+
+
