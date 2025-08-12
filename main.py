@@ -21,11 +21,11 @@ def main():
     dataset_path = DATA_PATH / "interim" / "generated_queries.csv"
     paraphrased_csv_path = DATA_PATH / "processed" / "output_paraphrased.csv"
     database_path = DATA_PATH / "database"
-    result_path = PROJECT_ROOT / "result" / "results.csv"
+    result_path = PROJECT_ROOT / "result" 
 
     # Flags
     dataset_force = False
-    paraphrasing_force = True
+    paraphrasing_force = False
     nl2sql_force = True
 
     # Step 1: Prepare dataset
@@ -88,16 +88,16 @@ def main():
             original_sql = row['sql_query']
             original_question = row['natural_language']
             db_full_path = database_path / db_name / f"{db_name}.sqlite"
-
+            schema = extract_schema(db_path=db_full_path)
             try:
                 # Generate SQL from paraphrased and original questions
-                llama_query_para = nl2sql_llama(paraphrased_question, db_full_path)
-                qwen_query_para = nl2sql_qwen(paraphrased_question, db_full_path)
-                gemma_query_para = nl2sql_gemma(paraphrased_question, db_full_path)
+                llama_query_para = nl2sql_llama(paraphrased_question, schema)
+                qwen_query_para = nl2sql_qwen(paraphrased_question, schema)
+                gemma_query_para = nl2sql_gemma(paraphrased_question, schema)
 
-                llama_query_original = nl2sql_llama(original_question, db_full_path)
-                qwen_query_original = nl2sql_qwen(original_question, db_full_path)
-                gemma_query_original = nl2sql_gemma(original_question, db_full_path)
+                llama_query_original = nl2sql_llama(original_question, schema)
+                qwen_query_original = nl2sql_qwen(original_question, schema)
+                gemma_query_original = nl2sql_gemma(original_question, schema)
 
                 # Evaluate correctness
                 llama_original_correct = compare_sql(db_full_path, original_sql, llama_query_original)
@@ -134,7 +134,7 @@ def main():
             except Exception as e:
                 logger.error(f"[Row {i}] NL2SQL error: {e}")
 
-        paraphrased_df.to_csv(result_path, index=False)
+        paraphrased_df.to_csv(result_path/"results.csv", index=False)
         logger.info(f"NL2SQL evaluation complete. Results saved to: {result_path}")
     else:
         logger.info("Skipping NL2SQL generation.")

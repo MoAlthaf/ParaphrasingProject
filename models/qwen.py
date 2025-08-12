@@ -12,7 +12,6 @@ from .prompt_templates import (
     SQL_GEN_SYSTEM_PROMPT,
     REGENERATE_SQL_PROMPT,
 )
-
 from multiprocessing import set_start_method
 
 load_dotenv()  # Load environment variables from .env file
@@ -24,8 +23,8 @@ os.environ['HUGGINGFACEHUB_API_TOKEN'] = os.getenv("HF_API_KEY")
 
 
 # === Change model and tokenizer here ===
-MODEL_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct"
-TOKENIZER_NAME = "meta-llama/Meta-Llama-3.1-8B-Instruct"
+MODEL_NAME ="XGenerationLab/XiYanSQL-QwenCoder-7B-2504"
+TOKENIZER_NAME ="XGenerationLab/XiYanSQL-QwenCoder-7B-2504"
 
 
 # Global variables (lazy-loaded)
@@ -132,9 +131,6 @@ def generate_sql(nl_question: str, schema: str) -> str:
         print(f"[generate_sql] Error: {e}")
         return ""
 
-
-def regenerate_paraphrase(question:str, schema:str) -> str:
-    return question
 
 if __name__=="__main__":
     pass
