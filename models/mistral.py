@@ -26,8 +26,8 @@ os.environ['HUGGINGFACEHUB_API_TOKEN'] = os.getenv("HF_API_KEY")
 
 
 # === Change model and tokenizer here ===
-MODEL_NAME ="google/gemma-2-9b-it"
-TOKENIZER_NAME ="google/gemma-2-9b-it"
+MODEL_NAME = "mistralai/Mistral-7B-Instruct-v0.3"          
+TOKENIZER_NAME ="mistralai/Mistral-7B-Instruct-v0.3"      
 
 
 # Global variables (lazy-loaded)
@@ -57,38 +57,11 @@ def get_llm_nl2nl():
             tokenizer=TOKENIZER_NAME,
             hf_token=os.environ['HF_TOKEN'],
             trust_remote_code=True,
-            tensor_parallel_size=2  # Parallel
+            tensor_parallel_size=1  # Parallel
         )
     return _llm_nl2nl
 
 
-def paraphrase_sentence(sentence: str, schema: str = "") -> str:
-    """
-    Paraphrase an NL question while guaranteeing SQL-equivalent semantics.
-    Falls back to the original if any semantic-drift guard fails.
-    """
-    tokenizer = get_tokenizer()
-
-    usr_msg = (
-        f"Here is the table schema for context:\n{schema}\n\n"
-        f"Original question:\n{sentence}"
-    )
-
-    chat_input = tokenizer.apply_chat_template(
-        [{"role": "system", "content": PARAPHRASE_SYSTEM_PROMPT},
-         {"role": "user", "content": usr_msg}],
-        tokenize=False,
-        add_generation_prompt=True
-    )
-
-    llm = get_llm_nl2nl()
-    try:
-        outputs = llm.generate(chat_input, sampling_params=_sampling_nl2nl)
-        para = outputs[0].outputs[0].text.strip()
-        return para
-    except Exception as e:
-        print(f"[paraphrase_sentence] Error: {e}")
-        return sentence
 
 
 def generate_sql(nl_question: str, schema: str) -> str:
@@ -145,11 +118,11 @@ def generate_sql_from_dataframe(
     checkpoint_every: Optional[int] = None,
 ) -> pd.DataFrame:
     """
-    Runs Gemma over the entire dataframe:
+    Runs Mistral over the entire dataframe:
       - generates SQL for original & paraphrased questions
       - evaluates correctness
-      - writes Gemma* columns into the same df
-      - optionally saves CSV (gemma_results.csv) and checkpoints every N rows
+      - writes Mistral* columns into the same df
+      - optionally saves CSV (mistral_results.csv) and checkpoints every N rows
     """
 
     # Stable key for later merges
@@ -157,9 +130,9 @@ def generate_sql_from_dataframe(
         paraphrased_df.insert(0, "row_id", range(len(paraphrased_df)))
 
     # Ensure output columns exist (avoid dtype churn)
-    cols = ["gemma_para_correct", "gemma_original_correct"]
+    cols = ["mistral_para_correct", "mistral_original_correct"]
     if store_sql:
-        cols += ["gemma_query_from_para", "gemma_query_from_original"]
+        cols += ["mistral_query_from_para", "mistral_query_from_original"]
     for c in cols:
         if c not in paraphrased_df.columns:
             paraphrased_df[c] = pd.NA
@@ -188,32 +161,32 @@ def generate_sql_from_dataframe(
             para_result = compare_sql(db_full_path, original_sql, query_para)
             original_result = compare_sql(db_full_path, original_sql, query_original)
 
-            paraphrased_df.at[i, "gemma_para_correct"] = bool(para_result)
-            paraphrased_df.at[i, "gemma_original_correct"] = bool(original_result)
+            paraphrased_df.at[i, "mistral_para_correct"] = bool(para_result)
+            paraphrased_df.at[i, "mistral_original_correct"] = bool(original_result)
 
             if store_sql:
-                paraphrased_df.at[i, "gemma_query_from_para"] = query_para
-                paraphrased_df.at[i, "gemma_query_from_original"] = query_original
+                paraphrased_df.at[i, "mistral_query_from_para"] = query_para
+                paraphrased_df.at[i, "mistral_query_from_original"] = query_original
 
             if (i + 1) % 50 == 0:
-                logger.info(f"[Gemma] processed {i+1} rows...")
+                logger.info(f"[Mistral] processed {i+1} rows...")
 
             if checkpoint_every and (i + 1) % checkpoint_every == 0 and result_path:
-                ckpt_file = result_path / "gemma_results_intermediate.csv"
+                ckpt_file = result_path / "mistral_results_intermediate.csv"
                 # Force robust CSV for checkpoints too
                 paraphrased_df.to_csv(
                     ckpt_file, index=False,
                     quoting=csv.QUOTE_ALL, escapechar='\\', lineterminator='\r\n'
                 )
-                logger.info(f"[Gemma] checkpoint saved at row {i+1}: {ckpt_file}")
+                logger.info(f"[Mistral] checkpoint saved at row {i+1}: {ckpt_file}")
 
         except Exception as e:
-            logger.error(f"[Row {i}] gemma NL2SQL error: {e}")
-            paraphrased_df.at[i, "gemma_para_correct"] = False
-            paraphrased_df.at[i, "gemma_original_correct"] = False
+            logger.error(f"[Row {i}] mistral NL2SQL error: {e}")
+            paraphrased_df.at[i, "mistral_para_correct"] = False
+            paraphrased_df.at[i, "mistral_original_correct"] = False
             if store_sql:
-                paraphrased_df.at[i, "gemma_query_from_para"] = None
-                paraphrased_df.at[i, "gemma_query_from_original"] = None
+                paraphrased_df.at[i, "mistral_query_from_para"] = None
+                paraphrased_df.at[i, "mistral_query_from_original"] = None
 
     # Build final_df with only existing columns
     base_order = [
@@ -224,20 +197,20 @@ def generate_sql_from_dataframe(
         "paraphrased_nl",
         "paraphrased_score",
     ]
-    sql_cols = ["gemma_query_from_para", "gemma_query_from_original"] if store_sql else []
-    flag_cols = ["gemma_para_correct", "gemma_original_correct"]
+    sql_cols = ["mistral_query_from_para", "mistral_query_from_original"] if store_sql else []
+    flag_cols = ["mistral_para_correct", "mistral_original_correct"]
 
     new_order = [c for c in (base_order + sql_cols + flag_cols) if c in paraphrased_df.columns]
     final_df = paraphrased_df.loc[:, new_order].copy()
 
     if result_path:
-        out = result_path / "gemma_results.csv"
+        out = result_path / "mistral_results.csv"
         # Robust CSV settings prevent “broken” rows in Excel/simple viewers
         final_df.to_csv(
             out, index=False,
             quoting=csv.QUOTE_ALL, escapechar='\\', lineterminator='\r\n'
         )
-        logger.info(f"Gemma evaluation complete. Results saved to: {out}")
+        logger.info(f"Mistral evaluation complete. Results saved to: {out}")
 
     return final_df
 

@@ -1,15 +1,15 @@
-
-
 from pathlib import Path
 import pandas as pd
 from time import time
+import json
+
 from src.prepare_dataset import main as prepare_dataset
 from src.utils.logger import setup_logger
 from src.utils.sql_utils import extract_schema
 from src.utils.paraphrase_score import score_paraphrase
 from models.llama import generate_sql_from_dataframe as nl2sql_llama, paraphrase_sentence, regenerate_paraphrase
 from models.qwen import generate_sql_from_dataframe as nl2sql_qwen
-from models.gemma import generate_sql_from_dataframe as nl2sql_gemma
+from models.mistral import generate_sql_from_dataframe as nl2sql_mistral
 
 
 def ensure_dirs(*paths: Path):
@@ -25,7 +25,7 @@ def main(
     evaluate: bool = False,
     run_llama: bool = False,
     run_qwen: bool = False,
-    run_gemma: bool = True,
+    run_mistral: bool = True,
     threshold: float = 0.7,
     max_retries: int = 1,
 ):
@@ -148,24 +148,24 @@ def main(
         else:
             logger.info("Skipping Qwen.")
 
-        # --- Gemma ---
-        if run_gemma:
+        # --- Mistral ---
+        if run_mistral:
             t = time()
-            logger.info("Gemma evaluation...")
+            logger.info("Mistral evaluation...")
             try:
-                _ = nl2sql_gemma(
+                _ = nl2sql_mistral(
                     paraphrased_df=paraphrased_df.copy(),
                     database_path=DATABASE,
-                    logger=setup_logger("gemma_logger", log_file=LOG_PATH / "gemma.log"),
+                    logger=setup_logger("mistral_logger", log_file=LOG_PATH / "mistral.log"),
                     result_path=RESULT,
                     checkpoint_every=None,
                     store_sql=True,
                 )
-                logger.info(f"Gemma evaluation completed in {time() - t:.2f}s. Results: {RESULT}/gemma_results.csv")
+                logger.info(f"Mistral evaluation completed in {time() - t:.2f}s. Results: {RESULT}/mistral_results.csv")
             except Exception as e:
-                logger.error(f"Gemma evaluation error: {e}")
+                logger.error(f"Mistral evaluation error: {e}")
         else:
-            logger.info("Skipping Gemma.")
+            logger.info("Skipping Mistral.")
     else:
         logger.info("Skipping NL2SQL generation.")
 
@@ -180,7 +180,7 @@ def main(
 
         llama_csv = RESULT / "llama_results.csv"
         qwen_csv = RESULT / "qwen_results.csv"
-        gemma_csv = RESULT / "gemma_results.csv"
+        mistral_csv = RESULT / "mistral_results.csv"
 
         if llama_csv.exists():
             dfs.append(pd.read_csv(llama_csv))
@@ -188,9 +188,9 @@ def main(
         if qwen_csv.exists():
             dfs.append(pd.read_csv(qwen_csv))
             keys.append("qwen_")
-        if gemma_csv.exists():
-            dfs.append(pd.read_csv(gemma_csv))
-            keys.append("gemma_")
+        if mistral_csv.exists():
+            dfs.append(pd.read_csv(mistral_csv))
+            keys.append("mistral_")
 
         base = pd.read_csv(paraphrased_csv_path)
         if "row_id" not in base.columns:
@@ -201,15 +201,15 @@ def main(
         # merge on row_id if present in model outputs; else fall back to index join
         for df in dfs:
             if "row_id" in df.columns:
-                final_df = final_df.merge(df.filter(regex="^(row_id|llama_|qwen_|gemma_)"), on="row_id", how="left")
+                final_df = final_df.merge(df.filter(regex="^(row_id|llama_|qwen_|mistral_)"), on="row_id", how="left")
             else:
-                final_df = final_df.join(df.filter(regex="^(llama_|qwen_|gemma_)"))
+                final_df = final_df.join(df.filter(regex="^(llama_|qwen_|mistral_)"))
 
         # ensure flags exist
         for col in [
             "llama_original_correct","llama_para_correct",
             "qwen_original_correct","qwen_para_correct",
-            "gemma_original_correct","gemma_para_correct",
+            "mistral_original_correct","mistral_para_correct",
         ]:
             if col not in final_df.columns:
                 final_df[col] = False
@@ -219,24 +219,41 @@ def main(
             & final_df["llama_para_correct"].eq(True)
             & final_df["qwen_original_correct"].eq(True)
             & final_df["qwen_para_correct"].eq(True)
-            & final_df["gemma_original_correct"].eq(True)
-            & final_df["gemma_para_correct"].eq(True)
+            & final_df["mistral_original_correct"].eq(True)
+            & final_df["mistral_para_correct"].eq(True)
         )
+        
         final_df["all_models_correct"] = all_ok.fillna(False).astype("int8")
 
         out = RESULT / "results.csv"
         final_df.to_csv(out, index=False)
         logger.info(f"Evaluation complete in {time() - t_eval:.2f}s. Saved to: {out}")
+        output_list = []
+        for _, row in final_df.iterrows():
+            output_list.append({
+                "row_id": row.get("row_id", ""),
+                "db_name": row.get("db_name", ""),
+                "NLQorg": row.get("natural_language", ""),
+                "NLQparap": row.get("paraphrased_nl", "") ,
+                "SQLorg": row.get("sql_query", ""),
+                "NLQorgOutput": {"llama":row.get("llama_para_correct", False),"qwen":row.get("qwen_para_correct", False),"mistral":row.get("mistral_para_correct", False),},
+                "NLQparapOutput": {"llama":row.get("llama_original_correct", False),"qwen":row.get("qwen_original_correct", False),"mistral":row.get("mistral_original_correct", False),},
+                "correct": int(row.get("llama_original_correct", 0)),
+            })
 
+        # Save as JSON
+        json_out = RESULT / "structured_result.json"
+        with open(json_out, "w") as f:
+            json.dump(output_list, f, indent=2)
 
 if __name__ == "__main__":
-    main(dataset_force = True,  # force dataset generation
+    main(dataset_force = False,  # force dataset generation
     paraphrasing_force = False,  # force paraphrasing
-    nl2sql_force = True,     # force NL2SQL generation
-    evaluate = False,   # evaluate results
+    nl2sql_force = False,     # force NL2SQL generation
+    evaluate = True,   # evaluate results
     run_llama = False,  # run LLaMA model
     run_qwen = False,  # run Qwen model
-    run_gemma = False,  # run Gemma model
+    run_mistral = False,  # run Mistral model
     threshold = 0.7,  # paraphrase score threshold
     max_retries = 1,  # max retries for paraphrasing if score is low
     )

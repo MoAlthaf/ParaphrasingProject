@@ -57,7 +57,7 @@ def get_llm_nl2nl():
             tokenizer=TOKENIZER_NAME,
             hf_token=os.environ['HF_TOKEN'],
             trust_remote_code=True,
-            tensor_parallel_size=2  # Parallel
+            tensor_parallel_size=1  # Parallel
         )
     return _llm_nl2nl
 
