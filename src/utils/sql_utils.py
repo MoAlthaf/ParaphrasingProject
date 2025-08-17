@@ -92,7 +92,7 @@ def run_query(db_path: Path, query: str) -> pd.DataFrame:
         try:
             return pd.read_sql_query(query, conn)
         except Exception as e:
-            raise ValueError(f"Query failed: {query}. Error: {e}")
+            return pd.DataFrame()  # Return empty DataFrame on error
 
 
 def extract_tables(sql: str) -> list:

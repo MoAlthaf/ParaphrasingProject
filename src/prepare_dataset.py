@@ -138,7 +138,7 @@ def generate_nl(sql_query, result, model="gpt-4o"):
 # --- Main Dataset Builder ---
 def main():
     rows = []
-    for db_file in islice(DB_PATH.iterdir(), 25):
+    for db_file in DB_PATH.iterdir():
         db_full_path = DB_PATH / db_file / f"{db_file.name}.sqlite"
         logger.info(f"Processing DB: {db_file.name}")
         

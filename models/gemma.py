@@ -6,6 +6,9 @@ import pandas as pd
 from transformers import AutoTokenizer
 from dotenv import load_dotenv
 from pathlib import Path
+from src.utils.sql_utils import extract_schema,compare_sql
+import csv
+from typing import Optional, Dict
 
 from .prompt_templates import (
     PARAPHRASE_SYSTEM_PROMPT,
@@ -131,6 +134,112 @@ def generate_sql(nl_question: str, schema: str) -> str:
         print(f"[generate_sql] Error: {e}")
         return ""
 
+
+def generate_sql_from_dataframe(
+    paraphrased_df: pd.DataFrame,
+    database_path: Path,
+    *,
+    logger,
+    result_path: Optional[Path] = None,
+    store_sql: bool = True,
+    checkpoint_every: Optional[int] = None,
+) -> pd.DataFrame:
+    """
+    Runs Gemma over the entire dataframe:
+      - generates SQL for original & paraphrased questions
+      - evaluates correctness
+      - writes Gemma* columns into the same df
+      - optionally saves CSV (gemma_results.csv) and checkpoints every N rows
+    """
+
+    # Stable key for later merges
+    if "row_id" not in paraphrased_df.columns:
+        paraphrased_df.insert(0, "row_id", range(len(paraphrased_df)))
+
+    # Ensure output columns exist (avoid dtype churn)
+    cols = ["gemma_para_correct", "gemma_original_correct"]
+    if store_sql:
+        cols += ["gemma_query_from_para", "gemma_query_from_original"]
+    for c in cols:
+        if c not in paraphrased_df.columns:
+            paraphrased_df[c] = pd.NA
+
+    # Cache schemas per DB (big speedup)
+    schema_cache: Dict[str, str] = {}
+
+    def get_schema(db_name: str, db_full_path: Path) -> str:
+        if db_name not in schema_cache:
+            schema_cache[db_name] = extract_schema(db_path=db_full_path)
+        return schema_cache[db_name]
+
+    for i, row in paraphrased_df.iterrows():
+        db_name = row["db_name"]
+        paraphrased_question = row["paraphrased_nl"]
+        original_sql = row["sql_query"]
+        original_question = row["natural_language"]
+        db_full_path = database_path / db_name / f"{db_name}.sqlite"
+
+        try:
+            schema = get_schema(db_name, db_full_path)
+
+            query_para = generate_sql(paraphrased_question, schema)
+            query_original = generate_sql(original_question, schema)
+
+            para_result = compare_sql(db_full_path, original_sql, query_para)
+            original_result = compare_sql(db_full_path, original_sql, query_original)
+
+            paraphrased_df.at[i, "gemma_para_correct"] = bool(para_result)
+            paraphrased_df.at[i, "gemma_original_correct"] = bool(original_result)
+
+            if store_sql:
+                paraphrased_df.at[i, "gemma_query_from_para"] = query_para
+                paraphrased_df.at[i, "gemma_query_from_original"] = query_original
+
+            if (i + 1) % 50 == 0:
+                logger.info(f"[Gemma] processed {i+1} rows...")
+
+            if checkpoint_every and (i + 1) % checkpoint_every == 0 and result_path:
+                ckpt_file = result_path / "gemma_results_intermediate.csv"
+                # Force robust CSV for checkpoints too
+                paraphrased_df.to_csv(
+                    ckpt_file, index=False,
+                    quoting=csv.QUOTE_ALL, escapechar='\\', lineterminator='\r\n'
+                )
+                logger.info(f"[Gemma] checkpoint saved at row {i+1}: {ckpt_file}")
+
+        except Exception as e:
+            logger.error(f"[Row {i}] gemma NL2SQL error: {e}")
+            paraphrased_df.at[i, "gemma_para_correct"] = False
+            paraphrased_df.at[i, "gemma_original_correct"] = False
+            if store_sql:
+                paraphrased_df.at[i, "gemma_query_from_para"] = None
+                paraphrased_df.at[i, "gemma_query_from_original"] = None
+
+    # Build final_df with only existing columns
+    base_order = [
+        "row_id",
+        "db_name",
+        "natural_language",
+        "sql_query",
+        "paraphrased_nl",
+        "paraphrased_score",
+    ]
+    sql_cols = ["gemma_query_from_para", "gemma_query_from_original"] if store_sql else []
+    flag_cols = ["gemma_para_correct", "gemma_original_correct"]
+
+    new_order = [c for c in (base_order + sql_cols + flag_cols) if c in paraphrased_df.columns]
+    final_df = paraphrased_df.loc[:, new_order].copy()
+
+    if result_path:
+        out = result_path / "gemma_results.csv"
+        # Robust CSV settings prevent “broken” rows in Excel/simple viewers
+        final_df.to_csv(
+            out, index=False,
+            quoting=csv.QUOTE_ALL, escapechar='\\', lineterminator='\r\n'
+        )
+        logger.info(f"Gemma evaluation complete. Results saved to: {out}")
+
+    return final_df
 
 if __name__=="__main__":
     pass
