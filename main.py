@@ -228,17 +228,47 @@ def main(
         out = RESULT / "results.csv"
         final_df.to_csv(out, index=False)
         logger.info(f"Evaluation complete in {time() - t_eval:.2f}s. Saved to: {out}")
+
         output_list = []
         for _, row in final_df.iterrows():
+
+            # build dictionaries (ordered keys: llama, qwen, mistral)
+            original_dict = {
+                "llama": row.get("llama_original_correct", False),
+                "qwen": row.get("qwen_original_correct", False),
+                "mistral": row.get("mistral_original_correct", False),
+            }
+            para_dict = {
+                "llama": row.get("llama_para_correct", False),
+                "qwen": row.get("qwen_para_correct", False),
+                "mistral": row.get("mistral_para_correct", False),
+            }
+
+            # compute final_paraphased_output
+            final_paraphased_output = False
+            true_in_original = [m for m, v in original_dict.items() if v]
+            if true_in_original and all(para_dict.get(m, False) for m in true_in_original):
+                final_paraphased_output = True
+
+            # JSON row
             output_list.append({
                 "row_id": row.get("row_id", ""),
                 "db_name": row.get("db_name", ""),
                 "NLQorg": row.get("natural_language", ""),
-                "NLQparap": row.get("paraphrased_nl", "") ,
+                "NLQparap": row.get("paraphrased_nl", ""),
                 "SQLorg": row.get("sql_query", ""),
-                "NLQorgOutput": {"llama":row.get("llama_para_correct", False),"qwen":row.get("qwen_para_correct", False),"mistral":row.get("mistral_para_correct", False),},
-                "NLQparapOutput": {"llama":row.get("llama_original_correct", False),"qwen":row.get("qwen_original_correct", False),"mistral":row.get("mistral_original_correct", False),},
-                "correct": int(row.get("llama_original_correct", 0)),
+                "NLQorgOutput": {
+                    "llama": row.get("llama_para_correct", False),
+                    "qwen": row.get("qwen_para_correct", False),
+                    "mistral": row.get("mistral_para_correct", False),
+                },
+                "NLQparapOutput": {
+                    "llama": row.get("llama_original_correct", False),
+                    "qwen": row.get("qwen_original_correct", False),
+                    "mistral": row.get("mistral_original_correct", False),
+                },
+                # replaced "correct" with this
+                "final_paraphased_output": final_paraphased_output,
             })
 
         # Save as JSON
