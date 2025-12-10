@@ -4,36 +4,85 @@ A pipeline to evaluate paraphrasing quality for NL→SQL tasks. The code paraphr
 
 ## Quick Start
 
-**Setup:**
+**1. Install dependencies:**
 ```bash
 pip install -r requirements.txt
 ```
 
-**Environment:**
-Set your Hugging Face API key:
+**2. Set Hugging Face API key:**
 ```powershell
 $env:HF_API_KEY = 'your_hf_api_key_here'
 # or create .env file: HF_API_KEY=your_key
 ```
 
-**Run:**
+**3. Run:**
 ```powershell
 python main.py
 ```
 
-For detailed setup, GPU requirements, and how to customize pipeline parameters, see [`CODE_README.md`](CODE_README.md).
+---
+
+## Setup & Configuration
+
+### GPU Requirements
+
+The project uses `vllm` for efficient LLM inference. Models run **sequentially** (not in parallel), so you only need enough VRAM for the largest model.
+
+**Memory per model (loaded individually):**
+- **LLaMA 3.1-8B**: ~16–18 GB VRAM
+- **Mistral 7B**: ~14–16 GB VRAM
+- **Qwen 7B**: ~14–16 GB VRAM
+
+**Minimum GPU needed:** **18 GB** (for LLaMA 3.1-8B, the largest model)  
+**Recommended:** **20–24 GB** (for headroom with batching & vLLM's KV cache)
+
+**Suitable GPUs:**
+- ✓ NVIDIA A100 (40GB+), A40 (48GB), RTX 4090 (24GB), RTX 6000 Ada (48GB)
+- ⚠ Smaller GPUs (RTX 3090, 12–20GB) may hit OOM with vLLM overhead
+
+### How to Run
+
+**Basic run (evaluation only, default):**
+```powershell
+python main.py
+```
+
+**Full pipeline (with flags):**
+```powershell
+python -c "from main import main; main(paraphrasing_force=True, nl2sql_force=True, evaluate=True, run_mistral=True)"
+```
+
+**Pipeline parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `dataset_force` | bool | `False` | Regenerate dataset (`data/interim/generated_queries.csv`) |
+| `paraphrasing_force` | bool | `False` | Re-run paraphrasing (LLaMA only) → `data/processed/output_paraphrased.csv` |
+| `nl2sql_force` | bool | `True` | Run NL→SQL generation for selected models |
+| `evaluate` | bool | `False` | Merge results → `result/results.csv` and `structured_result.json` |
+| `run_llama` | bool | `False` | Run LLaMA NL→SQL generation |
+| `run_qwen` | bool | `False` | Run Qwen NL→SQL generation |
+| `run_mistral` | bool | `True` | Run Mistral NL→SQL generation |
+| `threshold` | float | `0.7` | Paraphrase acceptance score (LLaMA stage only) |
+| `max_retries` | int | `1` | Retry paraphrasing if score < threshold |
+
+**Output files:**
+- `result/llama_results.csv`, `result/qwen_results.csv`, `result/mistral_results.csv` (per-model)
+- `result/results.csv` (merged results)
+- `result/structured_result.json` (structured output)
+- `logs/main.log`, `logs/llama.log`, `logs/qwen.log`, `logs/mistral.log`
+
+### Important Notes
+
+- **Paraphrasing is LLaMA-only:** Only `models/llama.py` implements `paraphrase_sentence()`. Paraphrasing always uses LLaMA, regardless of NL→SQL model selection.
+- **Mistral & Qwen:** Used for NL→SQL generation only (no paraphrasing function).
+- **`regenerate_paraphrase()` is a stub:** Currently returns original question; can be enhanced with retry logic.
+- **Trust remote code:** Models use `trust_remote_code=True`; audit if needed.
+- **Database structure:** Ensure `data/database/` contains subdirectories with `*.sqlite` files for each database.
 
 ---
 
 ## Documentation
-
-| Document | Purpose |
-|----------|---------|
-| **[`CODE_README.md`](CODE_README.md)** | Project overview, setup, GPU requirements, how to run with parameters |
-| **[`FUNCTIONS_README.md`](FUNCTIONS_README.md)** | Detailed function signatures and behavior for `main.py` and model modules |
-| **[`UTILS_README.md`](UTILS_README.md)** | Database utilities, schema extraction, SQL comparison |
-
----
 
 ## Project Structure
 
@@ -58,11 +107,10 @@ ParaphrasingProject/
 │   └── processed/                   # Paraphrased questions + scores
 ├── result/                          # Model outputs, aggregated results, structured JSON
 ├── logs/                            # Log files per stage
-├── CODE_README.md                   # Setup & configuration guide
 ├── FUNCTIONS_README.md              # Function reference
 ├── UTILS_README.md                  # Utility function reference
 ├── requirements.txt                 # Python dependencies
-└── README.md                        # This file
+└── README.md                        # This file (main documentation)
 ```
 
 ---
@@ -91,7 +139,7 @@ See [`CODE_README.md`](CODE_README.md) for detailed parameter documentation.
 - **Mistral 7B-Instruct** — Used for NL→SQL only
 - **Qwen (XiYanSQL)** — Used for NL→SQL only
 
-All models use `vllm` for efficient inference. Requires **18–24 GB VRAM**. See [`CODE_README.md`](CODE_README.md) for detailed GPU requirements.
+All models use `vllm` for efficient inference.
 
 ---
 
@@ -122,13 +170,10 @@ data/database/
 
 ---
 
-## Need Help?
+## Documentation Reference
 
-- **How do I run the pipeline?** → [`CODE_README.md`](CODE_README.md)
-- **What does `main()` do?** → [`FUNCTIONS_README.md`](FUNCTIONS_README.md)
-- **How does SQL comparison work?** → [`UTILS_README.md`](UTILS_README.md)
-- **What models are available?** → This file or [`CODE_README.md`](CODE_README.md)
+- **[`FUNCTIONS_README.md`](FUNCTIONS_README.md)** — Complete function reference for `main.py` and model modules (`llama.py`, `mistral.py`, `qwen.py`). Includes function signatures, parameters, return values, and usage examples.
+- **[`UTILS_README.md`](UTILS_README.md)** — Utility function documentation for `src/utils/`. Covers database operations, schema extraction, SQL comparison, logging, and paraphrase scoring.
 
 ---
 
-Last updated: December 2025
