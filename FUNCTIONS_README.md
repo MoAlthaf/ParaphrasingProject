@@ -2,6 +2,8 @@
 
 This document describes all functions in the main orchestrator (`main.py`) and model modules (`models/llama.py`, `models/qwen.py`, `models/mistral.py`). Each section covers function signatures, parameters, return values, and purpose.
 
+**For utility functions** (database operations, logging, schema extraction, SQL comparison), see [`UTILS_README.md`](UTILS_README.md).
+
 ---
 
 ## `main.py`
@@ -111,7 +113,15 @@ outputs = llm.generate(chat_input, sampling_params=_sampling_nl2nl)
 
 **Example:**
 ```python
-para = paraphrase_sentence("What is the total revenue?", schema="CREATE TABLE sales ...")
+from pathlib import Path
+from models.llama import paraphrase_sentence
+from src.utils.sql_utils import extract_schema
+
+db_path = Path("data/database/academic/academic.sqlite")
+schema = extract_schema(db_path)
+question = "How many authors are there?"
+paraphrased = paraphrase_sentence(question, schema)
+print(paraphrased)
 ```
 
 ---
@@ -134,7 +144,15 @@ para = paraphrase_sentence("What is the total revenue?", schema="CREATE TABLE sa
 
 **Example:**
 ```python
-sql = generate_sql("How many users are in the database?", schema="CREATE TABLE users ...")
+from pathlib import Path
+from models.llama import generate_sql
+from src.utils.sql_utils import extract_schema
+
+db_path = Path("data/database/academic/academic.sqlite")
+schema = extract_schema(db_path)
+question = "How many authors are there?"
+sql = generate_sql(question, schema)
+print(sql)
 ```
 
 ---
@@ -180,15 +198,21 @@ sql = generate_sql("How many users are in the database?", schema="CREATE TABLE u
 
 **Example:**
 ```python
+from pathlib import Path
+from models.llama import generate_sql_from_dataframe
+from src.utils.logger import setup_logger
+import pandas as pd
+
 df = pd.read_csv("data/processed/output_paraphrased.csv")
 result_df = generate_sql_from_dataframe(
     paraphrased_df=df,
     database_path=Path("data/database"),
-    logger=my_logger,
+    logger=setup_logger("llama_logger", Path("logs/llama.log")),
     result_path=Path("result"),
     store_sql=True,
     checkpoint_every=50
 )
+print(result_df.head())
 ```
 
 ---
@@ -347,6 +371,8 @@ result_df = generate_sql_from_dataframe(
 1. **Import & configure:**
    ```python
    from main import main
+   from src.utils.logger import setup_logger
+   from src.utils.sql_utils import extract_schema
    ```
 
 2. **Run the pipeline:**
@@ -369,13 +395,17 @@ result_df = generate_sql_from_dataframe(
    python main.py
    ```
 
-4. **Or, use a specific model directly:**
+4. **Or, use a specific model directly (with automatic schema extraction):**
    ```python
-   from models.llama import generate_sql, paraphrase_sentence
+   from pathlib import Path
+   from models.llama import generate_sql
+   from src.utils.sql_utils import extract_schema
    
-   schema = "CREATE TABLE users (id INT, name TEXT);"
-   para = paraphrase_sentence("How many users?", schema)
-   sql = generate_sql(para, schema)
+   db_path = Path("data/database/academic/academic.sqlite")
+   schema = extract_schema(db_path)  # Extracts schema automatically
+   question = "How many authors are there?"
+   sql = generate_sql(question, schema)
+   print(sql)
    ```
 
 ---
@@ -387,6 +417,7 @@ result_df = generate_sql_from_dataframe(
 - **Error handling:** All functions catch exceptions and return graceful fallbacks (original text or empty string).
 - **Logging:** Comprehensive logging via `setup_logger()` for debugging and monitoring progress.
 - **Schema caching:** `generate_sql_from_dataframe()` caches schemas per DB to avoid repeated I/O.
+- **Utilities:** For database operations (`extract_schema()`, `compare_sql()`, etc.) and logging, see [`UTILS_README.md`](UTILS_README.md).
 
 ---
 
