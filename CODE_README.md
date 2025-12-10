@@ -101,16 +101,9 @@ Output locations
 - **Aggregated results:**: `result/results.csv` and `result/structured_result.json`.
 - **Logs:**: `logs/main.log`, `logs/llama.log`, `logs/qwen.log`, `logs/mistral.log` (created via `src.utils.logger.setup_logger`).
 
-**Notes & quick tips**
+**Notes**
 - **Paraphrasing is LLaMA-only**: Only `models/llama.py` implements `paraphrase_sentence()`. The paraphrasing stage (step 2 in the pipeline) always uses LLaMA, regardless of which models you select for NL→SQL.
 - `models/qwen.py` and `models/mistral.py` do not include `paraphrase_sentence()` — they are used only for NL→SQL generation.
 - `regenerate_paraphrase()` in `models/llama.py` is a stub that currently returns the original question; you may want to implement a retry prompt or a fallback model for low-scoring paraphrases.
 - Models use `trust_remote_code=True` when loading tokenizers — be careful and pin or audit models if running in sensitive environments.
 - Make sure the `data/database/` folder contains the expected DB folders (one per dataset DB) with `*.sqlite` files so `src.utils.sql_utils.extract_schema` can find schemas.
-
-If you want, I can:
-- Add a short downloader/prep step for the Spyder dataset (if you provide the official link).
-- Add a small `run_pipeline.py` wrapper that provides a CLI for `main()` using `argparse` so you can pass flags easily from the shell.
-
----
-File created by the project helper. If you'd like me to add the Spyder dataset link or make a runnable CLI wrapper, tell me and I'll add it.
