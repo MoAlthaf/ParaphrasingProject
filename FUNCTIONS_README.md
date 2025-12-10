@@ -420,5 +420,3 @@ print(result_df.head())
 - **Utilities:** For database operations (`extract_schema()`, `compare_sql()`, etc.) and logging, see [`UTILS_README.md`](UTILS_README.md).
 
 ---
-
-File created by the project helper.
