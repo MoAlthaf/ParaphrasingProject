@@ -291,4 +291,3 @@ print(f"Score: {score}")  # Currently always returns 1.0
 
 ---
 
-File created by the project helper.
