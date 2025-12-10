@@ -1,10 +1,4 @@
-"# Project Overview" 
-
-Use the navigation links below to explore the project in more depth.
-
----
-
-##Documentation
+## Documentation
 
 ###  **1. Code Documentation**
 Detailed explanation of the codebase, file structure, modules, and logic.  
